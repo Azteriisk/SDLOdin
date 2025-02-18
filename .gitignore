@@ -1,0 +1,2 @@
+# Ignore the main executable generated from Odin code (no extension)
+main  # Replace with the actual name of your executable

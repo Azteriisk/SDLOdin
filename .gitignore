@@ -1,2 +1,4 @@
-# Ignore the main executable generated from Odin code (no extension)
-main  # Replace with the actual name of your executable
+# Ignore executable files
+main
+odin_maybe
+SDLOdin

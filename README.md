@@ -20,7 +20,7 @@ SDLOdin is a simple SDL2-based application that demonstrates the creation of a w
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/SDLOdin.git
+   git clone https://github.com/Azteriisk/SDLOdin.git
    cd SDLOdin
    ```
 

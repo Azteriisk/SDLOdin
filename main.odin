@@ -7,6 +7,7 @@
 //	- Poll predefined events looking for changes
 //	- Switch through present event types to handle requests appropriately
 //	- Initialize SDL2 Image Context
+//	- Creates graphics layers with SDL RenderCopies starting with a background layer
 
 package main
 
@@ -26,16 +27,20 @@ SCREEN_HEIGHT :: 600
 FRAMERATE_TARGET :: 120
 
 App :: struct {
-	window:   ^sdl.Window,
-	renderer: ^sdl.Renderer,
-	event:    sdl.Event,
+	window:     ^sdl.Window,
+	renderer:   ^sdl.Renderer,
+	event:      sdl.Event,
+	background: ^sdl.Texture,
 }
 
 app_cleanup :: proc(a: ^App) {
 	if a != nil {
+		if a.background != nil {sdl.DestroyTexture(a.background)}
+
 		if a.renderer != nil {sdl.DestroyRenderer(a.renderer)}
 		if a.window != nil {sdl.DestroyWindow(a.window)}
 
+		img.Quit()
 		sdl.Quit()
 	}
 }
@@ -76,6 +81,18 @@ initialize :: proc(a: ^App) -> bool {
 	return true
 }
 
+load_media :: proc(a: ^App) -> bool {
+	a.background = img.LoadTexture(a.renderer, "images/bg.jpg")
+	if a.background == nil {
+		fmt.eprintfln("Error Loading Textures: %s", img.GetError())
+		return false
+	}
+
+
+	return true
+
+}
+
 app_run :: proc(a: ^App) {
 	for {
 		// events
@@ -95,6 +112,7 @@ app_run :: proc(a: ^App) {
 
 		//drawing
 		sdl.RenderClear(a.renderer)
+		sdl.RenderCopy(a.renderer, a.background, nil, nil)
 		sdl.RenderPresent(a.renderer)
 
 		sdl.Delay(1000 / FRAMERATE_TARGET)
@@ -112,9 +130,18 @@ main :: proc() {
 		exit_status = 1
 		return
 	}
+
+	if !load_media(&app) {
+		exit_status = 1
+		return
+	}
+
+
 	app_run(&app)
 }
 
-
-// finish implementing SDL2 Image for hardware accelerated textures
-// look into default SDL supported Bitmap images potential performance impact for sprite rendering
+// [] Colors & Icons
+// [] Text Rendering
+// [] Programmatic Animation
+// [] Sprite Animation
+// [] Audio

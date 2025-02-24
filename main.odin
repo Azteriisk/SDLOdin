@@ -10,6 +10,9 @@
 //  - Creates graphics layers with SDL RenderCopies
 //  - Randomize background color on spacebar click with built-in randomize function with max param
 //  - Creates a surface texture for icon 
+//  - Initializes the TTF parser
+//  - Creates a surface using text & the loaded TTF
+//  - Converts the surface to a texture to be rendered & added to rendercopy steps
 
 package main
 
@@ -30,7 +33,7 @@ RENDER_FLAGS :: sdl.RENDERER_ACCELERATED
 WINDOW_TITLE :: "SDL Application"
 SCREEN_WIDTH :: 800
 SCREEN_HEIGHT :: 600
-FRAMERATE_TARGET :: 90 // Idk if this actually works, but it doesn't *not* work
+FRAMERATE_TARGET :: 120 // Idk if this actually works, but it doesn't *not* work
 
 FONT_SIZE :: 80
 
@@ -44,6 +47,8 @@ App :: struct {
     text_rect: sdl.Rect,
     font_color: sdl.Color,
     text_render: ^sdl.Texture,
+    key_state: [^]u8,
+    last_frame_time: u32,
 }
 
 Player :: struct {
@@ -52,7 +57,10 @@ Player :: struct {
     frame_time:    f32,            // Time per frame
     player_render: sdl.Rect,         // Player render rectangle
     last_frame_time: u32,          // Time of the last frame update
-    anim_fps: f32
+    last_move_time: u32,           // New: For movement timing
+    anim_fps: f32,
+    player_speed: i32,
+    facing_right: bool,  // Add this field
 }
 
 app_cleanup :: proc(a: ^App) {
@@ -123,6 +131,10 @@ initialize :: proc(a: ^App) -> bool {
     sdl.SetWindowIcon(a.window, icon_surf)
     sdl.FreeSurface(icon_surf)
 
+    a.key_state = sdl.GetKeyboardState(nil)
+
+    a.last_frame_time = sdl.GetTicks()
+
     return true
 }
 
@@ -142,7 +154,7 @@ load_media :: proc(a: ^App) -> bool {
     }
     a.player.anim_fps = 4
     a.player.current_frame = 0
-    a.player.frame_time = 1000 / a.player.anim_fps; //
+    a.player.frame_time = 1000 / a.player.anim_fps; // Sprite animation speed
     a.player.player_render = sdl.Rect{
         200,
         450,
@@ -150,7 +162,10 @@ load_media :: proc(a: ^App) -> bool {
         100,
     }
     a.player.last_frame_time = sdl.GetTicks() // Initialize last frame time
+    a.player.last_move_time = sdl.GetTicks() // Need move time because animation system isn't split out (1 file baybeeeeee)
+    a.player.player_speed = 112 // Player Speed value (not const bc idk)
 
+    a.player.facing_right = true  // Initialize facing right
 
     if a.renderer == nil {
         fmt.eprintfln("Error Creating Renderer: %s", sdl.GetError())
@@ -190,6 +205,23 @@ rand_background :: proc(a: ^App) {
     sdl.SetRenderDrawColor(a.renderer, u8(rand.int31_max(256)), u8(rand.int31_max(256)), u8(rand.int31_max(256)), 255)
 }
 
+player_input :: proc(p: ^Player, a: ^App) {
+    // Calculate delta time in seconds (convert from milliseconds)
+    current_time := sdl.GetTicks()
+    delta_time := f32(current_time - p.last_move_time) / 1000.0
+    p.last_move_time = current_time
+
+    // Apply delta time to movement
+    if a.key_state[sdl.Scancode.D] == 1 {
+        p.player_render.x += i32(f32(p.player_speed) * delta_time)
+        p.facing_right = true
+    }
+    if a.key_state[sdl.Scancode.A] == 1 {
+        p.player_render.x -= i32(f32(p.player_speed) * delta_time)
+        p.facing_right = false
+    }
+}
+
 app_run :: proc(a: ^App) {
     for {
         // events
@@ -201,26 +233,44 @@ app_run :: proc(a: ^App) {
                 #partial switch a.event.key.keysym.scancode {
                 case .ESCAPE:
                     return
-                    case .SPACE:
-                        rand_background(a)
+                case .SPACE:
+                    rand_background(a)
                 }
             }
         }
 
         // state update
         current_time := sdl.GetTicks()
-        if (current_time - a.player.last_frame_time) >= u32(a.player.frame_time) {
-            a.player.current_frame += 1
-            if a.player.current_frame >= len(a.player.textures) {
-                a.player.current_frame = 0 // Wrap frame index
+        // Only update animation if we're moving
+        if a.key_state[sdl.Scancode.A] == 1 || a.key_state[sdl.Scancode.D] == 1 {
+            if (current_time - a.player.last_frame_time) >= u32(1000 / a.player.anim_fps) {
+                a.player.current_frame += 1
+                if a.player.current_frame >= len(a.player.textures) {
+                    a.player.current_frame = 0 // Wrap frame index
+                }
+                a.player.last_frame_time = current_time // Update last frame time
             }
-            a.player.last_frame_time = current_time // Update last frame time
+        } else {
+            // Reset to first frame when not moving
+            a.player.current_frame = 0
         }
+
+        player_input(&a.player, a)
 
 
         //drawing
         sdl.RenderClear(a.renderer)
-        sdl.RenderCopy(a.renderer, a.player.textures[a.player.current_frame], nil, &a.player.player_render)
+        // Use RenderCopyEx instead of RenderCopy
+        flip_flag := a.player.facing_right ? sdl.RendererFlip.NONE : sdl.RendererFlip.HORIZONTAL
+        sdl.RenderCopyEx(
+            a.renderer, 
+            a.player.textures[a.player.current_frame], 
+            nil, 
+            &a.player.player_render,
+            0,    // rotation angle (degrees)
+            nil,  // center of rotation
+            flip_flag,
+        )
         sdl.RenderCopy(a.renderer, a.text_render, nil, &a.text_rect)
 
         sdl.RenderPresent(a.renderer)
@@ -232,26 +282,25 @@ app_run :: proc(a: ^App) {
 main :: proc() {
     exit_status := 0
     app: App
-
+    
     defer os.exit(exit_status)
     defer app_cleanup(&app)
-
+    
     if !initialize(&app) {
         exit_status = 1
         return
     }
-
+    
     if !load_media(&app) {
         exit_status = 1
         return
     }
-
-
+    
     app_run(&app)
 }
 
 // [✅] Colors & Icons
-// [] Text Rendering
-// [] Programmatic Animation aka Movement for game
+// [✅] Text Rendering
+// [✅] Programmatic Animation aka Movement for game
 // [✅] Sprite Animation
 // [] Audio 

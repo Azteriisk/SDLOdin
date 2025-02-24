@@ -37,17 +37,29 @@ FRAMERATE_TARGET :: 120 // Idk if this actually works, but it doesn't *not* work
 
 FONT_SIZE :: 80
 
+GRAVITY :: 2200  // Doubled from 980.0 for snappier falls
+
+
+Props :: struct {
+    floor: sdl.Rect,
+    // We can add more static objects here later like:
+    // platforms: []sdl.Rect,
+    // walls: []sdl.Rect,
+    // etc.
+}
+
 App :: struct {
     window:     ^sdl.Window,
     renderer:   ^sdl.Renderer,
-    icon: ^sdl.Surface,
+    icon:       ^sdl.Surface,
     event:      sdl.Event,
     player:     Player,
-    text:   cstring,
-    text_rect: sdl.Rect,
+    props:      Props,  // Add Props to App instead of just floor
+    text:       cstring,
+    text_rect:  sdl.Rect,
     font_color: sdl.Color,
     text_render: ^sdl.Texture,
-    key_state: [^]u8,
+    key_state:   [^]u8,
     last_frame_time: u32,
 }
 
@@ -61,6 +73,9 @@ Player :: struct {
     anim_fps: f32,
     player_speed: i32,
     facing_right: bool,  // Add this field
+    velocity_y: f32,    // Vertical velocity
+    is_grounded: bool,  // Is the player on the ground?
+    jump_force: f32,  // Add this field
 }
 
 app_cleanup :: proc(a: ^App) {
@@ -135,6 +150,14 @@ initialize :: proc(a: ^App) -> bool {
 
     a.last_frame_time = sdl.GetTicks()
 
+    // Initialize floor rectangle
+    a.props.floor = sdl.Rect{
+        x = 0,
+        y = SCREEN_HEIGHT - 100,  // 100 pixels from bottom
+        w = SCREEN_WIDTH,         // Full width of screen
+        h = 100,                  // Height of floor
+    }
+
     return true
 }
 
@@ -198,28 +221,65 @@ load_media :: proc(a: ^App) -> bool {
         return false
     }
 
+    a.player.jump_force = -600.0
+
     return true
 }
 
-rand_background :: proc(a: ^App) {
-    sdl.SetRenderDrawColor(a.renderer, u8(rand.int31_max(256)), u8(rand.int31_max(256)), u8(rand.int31_max(256)), 255)
+// Add this function to handle physics and collisions
+update_physics :: proc(p: ^Player, props: ^Props, delta_time: f32) {
+    // Apply gravity
+    if !p.is_grounded {
+        p.velocity_y += GRAVITY * delta_time
+    }
+
+    // Update position
+    p.player_render.y += i32(p.velocity_y * delta_time)
+
+    // Check floor collision
+    if p.player_render.y + p.player_render.h > props.floor.y {
+        p.player_render.y = props.floor.y - p.player_render.h
+        p.velocity_y = 0
+        p.is_grounded = true
+    } else {
+        p.is_grounded = false
+    }
 }
 
+// Modify player_input to handle jumping
 player_input :: proc(p: ^Player, a: ^App) {
-    // Calculate delta time in seconds (convert from milliseconds)
+    pixel_buffer := i32(30)
     current_time := sdl.GetTicks()
     delta_time := f32(current_time - p.last_move_time) / 1000.0
     p.last_move_time = current_time
+    
 
-    // Apply delta time to movement
+    // Horizontal movement with screen wrapping
     if a.key_state[sdl.Scancode.D] == 1 {
         p.player_render.x += i32(f32(p.player_speed) * delta_time)
         p.facing_right = true
+        // Wrap to left side when just off screen
+        if p.player_render.x >= SCREEN_WIDTH - pixel_buffer {
+            p.player_render.x = -p.player_render.w + pixel_buffer
+        }
     }
     if a.key_state[sdl.Scancode.A] == 1 {
         p.player_render.x -= i32(f32(p.player_speed) * delta_time)
         p.facing_right = false
+        // Wrap to right side when just off screen
+        if p.player_render.x <= -p.player_render.w + pixel_buffer {
+            p.player_render.x = SCREEN_WIDTH - pixel_buffer
+        }
     }
+    
+    // Jump when space is pressed and player is on the ground
+    if a.key_state[sdl.Scancode.SPACE] == 1 && p.is_grounded {
+        p.velocity_y = p.jump_force
+        p.is_grounded = false
+    }
+
+    // Update physics
+    update_physics(p, &a.props, delta_time)
 }
 
 app_run :: proc(a: ^App) {
@@ -233,8 +293,6 @@ app_run :: proc(a: ^App) {
                 #partial switch a.event.key.keysym.scancode {
                 case .ESCAPE:
                     return
-                case .SPACE:
-                    rand_background(a)
                 }
             }
         }
@@ -260,7 +318,13 @@ app_run :: proc(a: ^App) {
 
         //drawing
         sdl.RenderClear(a.renderer)
-        // Use RenderCopyEx instead of RenderCopy
+        
+        // Draw floor
+        sdl.SetRenderDrawColor(a.renderer, 100, 100, 100, 255)  // Gray color
+        sdl.RenderFillRect(a.renderer, &a.props.floor)
+        sdl.SetRenderDrawColor(a.renderer, 0, 0, 0, 255)  // Reset to black
+        
+        // Draw player
         flip_flag := a.player.facing_right ? sdl.RendererFlip.NONE : sdl.RendererFlip.HORIZONTAL
         sdl.RenderCopyEx(
             a.renderer, 
@@ -271,8 +335,8 @@ app_run :: proc(a: ^App) {
             nil,  // center of rotation
             flip_flag,
         )
+        
         sdl.RenderCopy(a.renderer, a.text_render, nil, &a.text_rect)
-
         sdl.RenderPresent(a.renderer)
 
         sdl.Delay(1000 / FRAMERATE_TARGET)
